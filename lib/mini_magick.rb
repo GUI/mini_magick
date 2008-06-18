@@ -58,6 +58,9 @@ module MiniMagick
         run_command("identify", "-format", format_option("%h"), @path).split("\n")[0].to_i
       when "width"
         run_command("identify", "-format", format_option("%w"), @path).split("\n")[0].to_i
+      when "dimensions"
+        dimensions = run_command("identify", "-format", format_option("%w %h"), @path).split("\n")[0].split(" ")
+        { :width => dimensions[0].to_i, :height => dimensions[1].to_i }
       when "size"
         File.size(@path) # Do this because calling identify -format "%b" on an animated gif fails!
       when "original_at"
@@ -82,7 +85,35 @@ module MiniMagick
 
       raise "Unable to format to #{format}" unless File.exists?(@path)
     end
-    
+
+    # Scale an image down and crop away any extra to achieve a certain size.
+    # This is handy for creating thumbnails of the same dimensions without
+    # changing the aspect ratio.
+    def crop_resized(width, height, gravity = "Center")
+      width = width.to_i
+      height = height.to_i
+
+      # Grab the width and height of the current image in one go.
+      dimensions = self[:dimensions]
+
+      # Only do anything if needs be. Who knows, maybe it's already the exact
+      # dimensions we're looking for.
+      if(width != dimensions[:width] && height != dimensions[:height])
+        combine_options do |c|
+          # Scale the image down to the widest dimension.
+          if(width != dimensions[:width] || height != dimensions[:height])
+            scale = [width / dimensions[:width].to_f, height / dimensions[:height].to_f].max * 100
+            c.resize("#{scale}%")
+          end
+
+          # Align how things will be cropped.
+          c.gravity(gravity)
+
+          # Crop the image to size.
+          c.crop("#{width}x#{height}+0+0")
+        end
+      end
+    end
 
     # Writes the temporary image that we are using for processing to the output path
     def write(output_path)
@@ -111,7 +142,7 @@ module MiniMagick
     def combine_options(&block)
       c = CommandBuilder.new
       block.call c
-      run_command("mogrify", *c.args << @path)
+      run_command("convert", *c.args << @path << @path)
     end
 
     # Check to see if we are running on win32 -- we need to escape things differently
